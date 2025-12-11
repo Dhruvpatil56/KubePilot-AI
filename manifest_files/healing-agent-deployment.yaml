@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healing-agent
+  namespace: sre-demo
+  labels:
+    app: healing-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: healing-agent
+  template:
+    metadata:
+      labels:
+        app: healing-agent
+    spec:
+      serviceAccountName: healing-agent
+      containers:
+      - name: healing-agent
+        image: healing-agent:v1
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8000
+        env:
+        - name: K8S_NAMESPACE
+          value: "sre-demo"
+        - name: ENABLE_AUTO_REMEDIATION
+          value: "true"
+        - name: DRY_RUN
+          value: "false"
+        - name: CONFIDENCE_THRESHOLD
+          value: "0.7"
+        - name: OPENAI_MODEL
+          value: "gpt-4o-mini"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 20

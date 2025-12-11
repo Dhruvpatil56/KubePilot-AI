@@ -1,0 +1,9 @@
+namespace: sre-demo
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - broken-app-alerts.yaml       # your custom alerts
+  - healing-agent-rbac.yaml
+  - healing-agent-deployment.yaml
+  - healing-agent-service.yaml
