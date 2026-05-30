@@ -5,28 +5,26 @@ metadata:
   namespace: sre-demo
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: healing-agent-role
-  namespace: sre-demo
 rules:
-  - apiGroups: [""]
-    resources: ["pods", "pods/log", "pods/status", "events"]
-    verbs: ["get", "list", "watch", "delete"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "replicasets", "deployments/scale"]
-    verbs: ["get", "list", "watch", "patch", "update"]
+- apiGroups: [""]
+  resources: ["pods", "pods/log", "events", "services"]
+  verbs: ["get", "list", "watch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "deployments/scale"]
+  verbs: ["get", "list", "watch", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   name: healing-agent-binding
-  namespace: sre-demo
 subjects:
-  - kind: ServiceAccount
-    name: healing-agent
-    namespace: sre-demo
+- kind: ServiceAccount
+  name: healing-agent
+  namespace: sre-demo
 roleRef:
-  kind: Role
+  kind: ClusterRole
   name: healing-agent-role
   apiGroup: rbac.authorization.k8s.io

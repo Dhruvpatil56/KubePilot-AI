@@ -219,3 +219,33 @@ class K8sClient:
         """
         return self.restart_deployment(deployment_name, namespace)
 
+
+# ---------- Remediation Actions ----------
+def restart_pod(pod_name: str, namespace: str):
+    try:
+        k8s_config.load_incluster_config()
+    except:
+        k8s_config.load_kube_config()
+    v1 = client.CoreV1Api()
+    v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
+    print(f"✅ Deleted pod {pod_name} — Kubernetes will recreate it")
+
+def scale_deployment(pod_name: str, namespace: str, replicas: int):
+    try:
+        k8s_config.load_incluster_config()
+    except:
+        k8s_config.load_kube_config()
+    apps_v1 = client.AppsV1Api()
+    # Get deployment name from pod
+    v1 = client.CoreV1Api()
+    pod = v1.read_namespaced_pod(name=pod_name, namespace=namespace)
+    owner = pod.metadata.owner_references[0]
+    rs = apps_v1.read_namespaced_replica_set(name=owner.name, namespace=namespace)
+    deploy_name = rs.metadata.owner_references[0].name
+    # Scale it
+    apps_v1.patch_namespaced_deployment_scale(
+        name=deploy_name,
+        namespace=namespace,
+        body={"spec": {"replicas": replicas}}
+    )
+    print(f"✅ Scaled {deploy_name} to {replicas} replicas")

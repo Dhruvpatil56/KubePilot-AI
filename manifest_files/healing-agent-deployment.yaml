@@ -3,8 +3,6 @@ kind: Deployment
 metadata:
   name: healing-agent
   namespace: sre-demo
-  labels:
-    app: healing-agent
 spec:
   replicas: 1
   selector:
@@ -23,32 +21,37 @@ spec:
         ports:
         - containerPort: 8000
         env:
+        - name: LLM_PROVIDER
+          value: "groq"
+        - name: GROQ_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kubepilot-secrets
+              key: GROQ_API_KEY
+        - name: GROQ_MODEL
+          value: "llama-3.3-70b-versatile"
         - name: K8S_NAMESPACE
           value: "sre-demo"
         - name: ENABLE_AUTO_REMEDIATION
           value: "true"
         - name: DRY_RUN
-          value: "false"
+          value: "true"
         - name: CONFIDENCE_THRESHOLD
           value: "0.7"
-        - name: OPENAI_MODEL
-          value: "gpt-4o-mini"
         resources:
           requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 200m
+            cpu: 100m
             memory: 256Mi
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 5
-          periodSeconds: 10
+          limits:
+            cpu: 500m
+            memory: 512Mi
         livenessProbe:
           httpGet:
             path: /health
             port: 8000
-          initialDelaySeconds: 10
-          periodSeconds: 20
+          initialDelaySeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30

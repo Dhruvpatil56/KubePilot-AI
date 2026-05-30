@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: broken-app
+  namespace: sre-demo
   labels:
     app: broken-app
 spec:
@@ -41,4 +42,3 @@ spec:
             port: 5000
           initialDelaySeconds: 5
           periodSeconds: 5
-

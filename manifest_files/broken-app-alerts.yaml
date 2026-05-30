@@ -2,63 +2,39 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: broken-app-alerts
-  namespace: sre-monitoring
+  namespace: monitoring
   labels:
-    release: monitoring
+    release: prometheus
 spec:
   groups:
-  - name: broken-app.rules
+  - name: broken-app
     rules:
-    - alert: BrokenAppCrashLooping
-      expr: increase(kube_pod_container_status_restarts_total{namespace="sre-demo", pod=~"broken-app.*"}[5m]) > 3
-      for: 2m
+    - alert: PodCrashLooping
+      expr: rate(kube_pod_container_status_restarts_total{namespace="sre-demo"}[5m]) > 0
+      for: 1m
       labels:
         severity: critical
+        slo_impact: high
       annotations:
-        summary: "Broken App is crash looping"
-        description: "Pod {{ $labels.pod }} restarted {{ $value }} times in the last 5m"
+        summary: "Pod {{ $labels.pod }} is crash looping"
+        action: restart_pod
 
-    - alert: BrokenAppOOMKilled
-      expr: kube_pod_container_status_last_terminated_reason{namespace="sre-demo", reason="OOMKilled", pod=~"broken-app.*"} > 0
-      for: 30s
+    - alert: PodOOMKilled
+      expr: kube_pod_container_status_last_terminated_reason{namespace="sre-demo", reason="OOMKilled"} == 1
+      for: 1m
       labels:
-        severity: warning
+        severity: critical
+        slo_impact: high
       annotations:
-        summary: "Broken App OOMKilled"
-        description: "Pod {{ $labels.pod }} was OOMKilled"
+        summary: "Pod {{ $labels.pod }} was OOMKilled"
+        action: scale_up
 
-    - alert: BrokenAppHighMemoryUsage
-      expr: |
-        (container_memory_usage_bytes{namespace="sre-demo", pod=~"broken-app.*"} /
-         container_spec_memory_limit_bytes{namespace="sre-demo", pod=~"broken-app.*"}) > 0.80
+    - alert: PodNotReady
+      expr: kube_pod_status_ready{namespace="sre-demo", condition="true"} == 0
       for: 2m
       labels:
         severity: warning
+        slo_impact: medium
       annotations:
-        summary: "Broken App memory usage high"
-        description: "Pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of its memory limit"
-
-    - alert: BrokenAppHighErrorRate
-      expr: |
-        sum(rate(http_requests_total{namespace="sre-demo", pod=~"broken-app.*", status=~"5.."}[5m])) /
-        sum(rate(http_requests_total{namespace="sre-demo", pod=~"broken-app.*"}[5m])) > 0.20
-      for: 2m
-      labels:
-        severity: warning
-      annotations:
-        summary: "Broken App has high error rate"
-        description: "More than 20% of requests are 5xx for pod {{ $labels.pod }}"
-
-    - alert: BrokenAppHighLatency
-      expr: |
-        histogram_quantile(0.95,
-          sum by (le, pod) (
-            rate(http_request_duration_seconds_bucket{namespace="sre-demo", pod=~"broken-app.*"}[5m])
-          )
-        ) > 5
-      for: 2m
-      labels:
-        severity: warning
-      annotations:
-        summary: "Broken App latency is high"
-        description: "P95 latency > 5s for pod {{ $labels.pod }}"
+        summary: "Pod {{ $labels.pod }} is not ready"
+        action: restart_pod
