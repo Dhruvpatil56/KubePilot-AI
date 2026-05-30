@@ -1,14 +1,14 @@
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from typing import TypedDict, Annotated
 import operator
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import GROQ_API_KEY, GROQ_MODEL, ALLOWED_ACTIONS
+from config import ALLOWED_ACTIONS
 from agent.tools import TOOLS
+from llm.factory import get_llm_provider
 
 # ---------- State ----------
 class AgentState(TypedDict):
@@ -19,10 +19,9 @@ class AgentState(TypedDict):
     rca: dict
 
 # ---------- LLM ----------
-llm = ChatGroq(
-    api_key=GROQ_API_KEY,
-    model=GROQ_MODEL
-).bind_tools(TOOLS)
+provider = get_llm_provider()
+print(f"LLM Provider: {provider.get_provider_name()}")
+llm = provider.get_llm()
 
 # ---------- System Prompt ----------
 SYSTEM_PROMPT = """You are KubePilot AI, an expert Site Reliability Engineer agent.

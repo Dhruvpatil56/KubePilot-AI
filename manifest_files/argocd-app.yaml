@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kubepilot-ai
+  namespace: argocd
+  labels:
+    app.kubernetes.io/managed-by: kubepilot-ai
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/Dhruvpatil56/KubePilot-AI
+    targetRevision: main
+    path: manifest_files
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sre-demo
+
+  syncPolicy:
+    # Auto-sync is disabled — engineer must review and merge the PR first.
+    # ArgoCD will only sync when triggered manually via the UI, CLI, or API.
+    automated: null
+    syncOptions:
+      - CreateNamespace=true
