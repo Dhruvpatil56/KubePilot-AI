@@ -4,4 +4,5 @@ kubernetes
 pydantic
 python-dotenv
 openai
+requests
 

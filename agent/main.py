@@ -1,4 +1,5 @@
 from fastapi import FastAPI, BackgroundTasks
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional
 import uvicorn
@@ -10,11 +11,15 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import ENABLE_AUTO_REMEDIATION, DRY_RUN, CONFIDENCE_THRESHOLD, ALLOWED_ACTIONS
 from agent.graph import investigate
 from agent.k8s_client import restart_pod, scale_deployment
+from agent.database import init_db, save_incident, get_all_incidents
+from agent.dashboard import get_dashboard_html
+from agent.notifier import send_slack_notification
 
 app = FastAPI(title="KubePilot AI", version="2.0.0")
 
-# In-memory incident store
-incidents = []
+@app.on_event("startup")
+def startup():
+    init_db()
 
 # ---------- Models ----------
 class AlertLabel(BaseModel):
@@ -49,7 +54,12 @@ def health():
 
 @app.get("/incidents")
 def get_incidents():
-    return {"total": len(incidents), "incidents": incidents}
+    all_incidents = get_all_incidents()
+    return {"total": len(all_incidents), "incidents": all_incidents}
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    return get_dashboard_html()
 
 @app.post("/webhook/alert")
 async def handle_alert(payload: AlertPayload, background_tasks: BackgroundTasks):
@@ -68,7 +78,6 @@ async def process_alert(alert: Alert):
     print(f"\n⚡ Processing: {alert_name} | Pod: {pod_name}")
 
     incident = {
-        "id": len(incidents) + 1,
         "timestamp": datetime.utcnow().isoformat(),
         "alert": alert_name,
         "pod": pod_name,
@@ -126,8 +135,10 @@ async def process_alert(alert: Alert):
         incident["status"] = "error"
         incident["error"] = str(e)
 
-    incidents.append(incident)
+    incident_id = save_incident(incident)
+    incident["id"] = incident_id
     print(f"\n📋 Incident logged: #{incident['id']}")
+    send_slack_notification(incident)
 
 # ---------- Execute Action ----------
 def execute_action(action: str, pod_name: str, namespace: str, incident: dict):

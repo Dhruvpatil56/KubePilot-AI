@@ -1,6 +1,8 @@
 from kubernetes import client, config as k8s_config
 from typing import Dict, List, Optional
+from datetime import datetime, timezone
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -213,11 +215,79 @@ class K8sClient:
             return False
 
     def rollback_deployment(self, deployment_name: str, namespace: str) -> bool:
-        """
-        'Rollback' placeholder – here implemented as a restart trigger.
-        Real rollback would be via GitOps or previous ReplicaSet selection.
-        """
-        return self.restart_deployment(deployment_name, namespace)
+        """Roll back a deployment to its previous revision via ReplicaSet history."""
+        try:
+            deployment = self.apps_v1.read_namespaced_deployment(
+                name=deployment_name, namespace=namespace
+            )
+            selector = deployment.spec.selector.match_labels
+            label_selector = ",".join(f"{k}={v}" for k, v in selector.items())
+
+            all_rs = self.apps_v1.list_namespaced_replica_set(
+                namespace=namespace, label_selector=label_selector
+            )
+
+            def _revision(rs):
+                return int((rs.metadata.annotations or {}).get(
+                    "deployment.kubernetes.io/revision", 0
+                ))
+
+            sorted_rs = sorted(all_rs.items, key=_revision, reverse=True)
+            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            if len(sorted_rs) >= 2:
+                prev_rs = sorted_rs[1]
+                containers = prev_rs.spec.template.spec.containers
+                image_patch = [{"name": c.name, "image": c.image} for c in containers]
+                logger.info(
+                    f"Rolling back {deployment_name} to revision {_revision(prev_rs)}"
+                )
+            else:
+                logger.warning(
+                    f"No previous revision for {deployment_name}, triggering restart"
+                )
+                image_patch = None
+
+            patch: dict = {
+                "spec": {
+                    "template": {
+                        "metadata": {
+                            "annotations": {
+                                "kubectl.kubernetes.io/restartedAt": now_str
+                            }
+                        },
+                        "spec": {},
+                    }
+                }
+            }
+            if image_patch:
+                patch["spec"]["template"]["spec"]["containers"] = image_patch
+
+            self.apps_v1.patch_namespaced_deployment(
+                name=deployment_name, namespace=namespace, body=patch
+            )
+
+            # Wait up to 60s for rollback to complete
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                dep = self.apps_v1.read_namespaced_deployment(
+                    name=deployment_name, namespace=namespace
+                )
+                desired = dep.spec.replicas or 1
+                available = dep.status.available_replicas or 0
+                if available >= desired:
+                    logger.info(
+                        f"Rollback complete: {deployment_name} {available}/{desired} available"
+                    )
+                    return True
+                time.sleep(5)
+
+            logger.warning(f"Rollback timeout: {deployment_name} not fully available after 60s")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error rolling back deployment {deployment_name}: {e}")
+            return False
 
 
 # ---------- Remediation Actions ----------
@@ -249,3 +319,112 @@ def scale_deployment(pod_name: str, namespace: str, replicas: int):
         body={"spec": {"replicas": replicas}}
     )
     print(f"✅ Scaled {deploy_name} to {replicas} replicas")
+
+
+def verify_rollback(deployment_name: str, namespace: str, timeout: int = 60) -> bool:
+    """Return True when availableReplicas >= replicas within timeout seconds."""
+    try:
+        k8s_config.load_incluster_config()
+    except Exception:
+        k8s_config.load_kube_config()
+
+    apps_v1 = client.AppsV1Api()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        dep = apps_v1.read_namespaced_deployment(name=deployment_name, namespace=namespace)
+        desired = dep.spec.replicas or 1
+        available = dep.status.available_replicas or 0
+        if available >= desired:
+            print(f"✅ {deployment_name}: {available}/{desired} replicas available — rollback healthy")
+            return True
+        time.sleep(5)
+    print(f"❌ Rollback timeout: {deployment_name} not fully available after {timeout}s")
+    return False
+
+
+def rollback_deployment(pod_name: str, namespace: str) -> bool:
+    """
+    Roll back the deployment that owns pod_name to its previous revision.
+    Steps:
+      1. Trace pod → ReplicaSet → Deployment
+      2. List all ReplicaSets ordered by deployment.kubernetes.io/revision annotation
+      3. Patch deployment spec with previous revision's container images
+         and set kubectl.kubernetes.io/restartedAt to trigger a rolling update
+      4. Wait up to 60s via verify_rollback for healthy state
+    """
+    try:
+        k8s_config.load_incluster_config()
+    except Exception:
+        k8s_config.load_kube_config()
+
+    core_v1 = client.CoreV1Api()
+    apps_v1 = client.AppsV1Api()
+
+    # Step 1: pod → ReplicaSet → Deployment
+    pod = core_v1.read_namespaced_pod(name=pod_name, namespace=namespace)
+
+    rs_name = None
+    for ref in pod.metadata.owner_references or []:
+        if ref.kind == "ReplicaSet":
+            rs_name = ref.name
+            break
+    if not rs_name:
+        print(f"❌ Could not find ReplicaSet owner for pod {pod_name}")
+        return False
+
+    rs = apps_v1.read_namespaced_replica_set(name=rs_name, namespace=namespace)
+
+    deploy_name = None
+    for ref in rs.metadata.owner_references or []:
+        if ref.kind == "Deployment":
+            deploy_name = ref.name
+            break
+    if not deploy_name:
+        print(f"❌ Could not find Deployment owner for ReplicaSet {rs_name}")
+        return False
+
+    print(f"🔁 Rolling back deployment {deploy_name} in {namespace}")
+
+    # Step 2: rollout history via ReplicaSets ordered by revision annotation
+    deployment = apps_v1.read_namespaced_deployment(name=deploy_name, namespace=namespace)
+    selector = deployment.spec.selector.match_labels
+    label_selector = ",".join(f"{k}={v}" for k, v in selector.items())
+
+    all_rs = apps_v1.list_namespaced_replica_set(namespace=namespace, label_selector=label_selector)
+
+    def _revision(r):
+        return int((r.metadata.annotations or {}).get("deployment.kubernetes.io/revision", 0))
+
+    sorted_rs = sorted(all_rs.items, key=_revision, reverse=True)
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Step 3: build rollback patch
+    if len(sorted_rs) >= 2:
+        prev_rs = sorted_rs[1]
+        containers = prev_rs.spec.template.spec.containers
+        image_patch = [{"name": c.name, "image": c.image} for c in containers]
+        print(f"⏪ Targeting revision {_revision(prev_rs)}: {[c['image'] for c in image_patch]}")
+    else:
+        print(f"⚠️  No previous revision found for {deploy_name} — triggering restart")
+        image_patch = None
+
+    patch: dict = {
+        "spec": {
+            "template": {
+                "metadata": {
+                    "annotations": {
+                        "kubectl.kubernetes.io/restartedAt": now_str
+                    }
+                },
+                "spec": {},
+            }
+        }
+    }
+    if image_patch:
+        patch["spec"]["template"]["spec"]["containers"] = image_patch
+
+    apps_v1.patch_namespaced_deployment(name=deploy_name, namespace=namespace, body=patch)
+    print(f"✅ Rollback patch applied to {deploy_name}")
+
+    # Step 4: wait up to 60s for rollback to complete
+    return verify_rollback(deploy_name, namespace)
