@@ -4,9 +4,14 @@ import sys
 import time
 import random
 
+# CRASH_ON_START check at module level — before Flask even initializes
+if os.getenv("CRASH_ON_START") == "true":
+    print("CRASH_ON_START=true — crashing intentionally for demo", flush=True)
+    sys.exit(1)
+
 app = Flask(__name__)
 
-# Simulated memory leak
+# Simulated memory leak storage
 memory_hog = []
 
 @app.route('/')
@@ -19,22 +24,25 @@ def home():
 
 @app.route('/health')
 def health():
+    # If CRASH_HEALTH is set, fail health checks to trigger liveness probe failure
+    if os.getenv("CRASH_HEALTH") == "true":
+        return jsonify({"status": "unhealthy"}), 500
     return jsonify({"status": "healthy"}), 200
+
+@app.route('/crash')
+def crash():
+    """Endpoint that crashes the app"""
+    print("Crash endpoint hit — exiting", flush=True)
+    sys.exit(1)
 
 @app.route('/memory-leak')
 def memory_leak():
     """Endpoint that causes OOMKill"""
-    # Allocate 10MB each call
     memory_hog.append(' ' * 10 * 1024 * 1024)
     return jsonify({
         "message": "Memory allocated",
         "total_mb": len(memory_hog) * 10
     })
-
-@app.route('/crash')
-def crash():
-    """Endpoint that crashes the app"""
-    sys.exit(1)
 
 @app.route('/slow')
 def slow():
@@ -50,9 +58,4 @@ def random_error():
     return jsonify({"message": "success"})
 
 if __name__ == '__main__':
-    # Check for crash-on-start mode
-    if os.getenv("CRASH_ON_START") == "true":
-        print("CRASH_ON_START is true, exiting...")
-        sys.exit(1)
-    
     app.run(host='0.0.0.0', port=5000)
