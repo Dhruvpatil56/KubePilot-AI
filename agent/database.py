@@ -96,3 +96,16 @@ def get_incident_by_id(incident_id: int) -> Optional[dict]:
     if row is None:
         return None
     return _row_to_dict(row)
+
+
+def is_duplicate_incident(pod_name: str, alert_name: str, minutes: int = 5) -> bool:
+    con = _connect()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT COUNT(*) FROM incidents WHERE pod = ? AND alert = ? "
+        "AND timestamp > datetime('now', ?)",
+        (pod_name, alert_name, f"-{minutes} minutes"),
+    )
+    count = cur.fetchone()[0]
+    con.close()
+    return count > 0

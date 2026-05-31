@@ -298,7 +298,7 @@ def restart_pod(pod_name: str, namespace: str):
         k8s_config.load_kube_config()
     v1 = client.CoreV1Api()
     v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
-    print(f"✅ Deleted pod {pod_name} — Kubernetes will recreate it")
+    logger.info(f"✅ Deleted pod {pod_name} — Kubernetes will recreate it")
 
 def scale_deployment(pod_name: str, namespace: str, replicas: int):
     try:
@@ -318,7 +318,7 @@ def scale_deployment(pod_name: str, namespace: str, replicas: int):
         namespace=namespace,
         body={"spec": {"replicas": replicas}}
     )
-    print(f"✅ Scaled {deploy_name} to {replicas} replicas")
+    logger.info(f"✅ Scaled {deploy_name} to {replicas} replicas")
 
 
 def verify_rollback(deployment_name: str, namespace: str, timeout: int = 60) -> bool:
@@ -335,10 +335,10 @@ def verify_rollback(deployment_name: str, namespace: str, timeout: int = 60) -> 
         desired = dep.spec.replicas or 1
         available = dep.status.available_replicas or 0
         if available >= desired:
-            print(f"✅ {deployment_name}: {available}/{desired} replicas available — rollback healthy")
+            logger.info(f"✅ {deployment_name}: {available}/{desired} replicas available — rollback healthy")
             return True
         time.sleep(5)
-    print(f"❌ Rollback timeout: {deployment_name} not fully available after {timeout}s")
+    logger.warning(f"❌ Rollback timeout: {deployment_name} not fully available after {timeout}s")
     return False
 
 
@@ -369,7 +369,7 @@ def rollback_deployment(pod_name: str, namespace: str) -> bool:
             rs_name = ref.name
             break
     if not rs_name:
-        print(f"❌ Could not find ReplicaSet owner for pod {pod_name}")
+        logger.error(f"❌ Could not find ReplicaSet owner for pod {pod_name}")
         return False
 
     rs = apps_v1.read_namespaced_replica_set(name=rs_name, namespace=namespace)
@@ -380,10 +380,10 @@ def rollback_deployment(pod_name: str, namespace: str) -> bool:
             deploy_name = ref.name
             break
     if not deploy_name:
-        print(f"❌ Could not find Deployment owner for ReplicaSet {rs_name}")
+        logger.error(f"❌ Could not find Deployment owner for ReplicaSet {rs_name}")
         return False
 
-    print(f"🔁 Rolling back deployment {deploy_name} in {namespace}")
+    logger.info(f"🔁 Rolling back deployment {deploy_name} in {namespace}")
 
     # Step 2: rollout history via ReplicaSets ordered by revision annotation
     deployment = apps_v1.read_namespaced_deployment(name=deploy_name, namespace=namespace)
@@ -403,9 +403,9 @@ def rollback_deployment(pod_name: str, namespace: str) -> bool:
         prev_rs = sorted_rs[1]
         containers = prev_rs.spec.template.spec.containers
         image_patch = [{"name": c.name, "image": c.image} for c in containers]
-        print(f"⏪ Targeting revision {_revision(prev_rs)}: {[c['image'] for c in image_patch]}")
+        logger.info(f"⏪ Targeting revision {_revision(prev_rs)}: {[c['image'] for c in image_patch]}")
     else:
-        print(f"⚠️  No previous revision found for {deploy_name} — triggering restart")
+        logger.warning(f"⚠️  No previous revision found for {deploy_name} — triggering restart")
         image_patch = None
 
     patch: dict = {
@@ -424,7 +424,7 @@ def rollback_deployment(pod_name: str, namespace: str) -> bool:
         patch["spec"]["template"]["spec"]["containers"] = image_patch
 
     apps_v1.patch_namespaced_deployment(name=deploy_name, namespace=namespace, body=patch)
-    print(f"✅ Rollback patch applied to {deploy_name}")
+    logger.info(f"✅ Rollback patch applied to {deploy_name}")
 
     # Step 4: wait up to 60s for rollback to complete
     return verify_rollback(deploy_name, namespace)

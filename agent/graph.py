@@ -5,10 +5,15 @@ from typing import TypedDict, Annotated
 import operator
 import sys
 import os
+import time
+import logging
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import ALLOWED_ACTIONS
 from agent.tools import TOOLS
 from llm.factory import get_llm_provider
+
+logger = logging.getLogger(__name__)
 
 # ---------- State ----------
 class AgentState(TypedDict):
@@ -18,10 +23,12 @@ class AgentState(TypedDict):
     alert_name: str
     rca: dict
 
+
 # ---------- LLM ----------
 provider = get_llm_provider()
-print(f"LLM Provider: {provider.get_provider_name()}")
+logger.info(f"LLM Provider: {provider.get_provider_name()}")
 llm = provider.get_llm()
+
 
 # ---------- System Prompt ----------
 SYSTEM_PROMPT = """You are KubePilot AI, an expert Site Reliability Engineer agent.
@@ -45,11 +52,13 @@ After investigation, respond with this exact JSON:
   "risk_level": "low, medium, or high"
 }"""
 
+
 # ---------- Agent Node ----------
 def agent_node(state: AgentState):
     messages = state["messages"]
     response = llm.invoke(messages)
     return {"messages": [response]}
+
 
 # ---------- Should Continue ----------
 def should_continue(state: AgentState):
@@ -57,6 +66,7 @@ def should_continue(state: AgentState):
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         return "tools"
     return END
+
 
 # ---------- Build Graph ----------
 tool_node = ToolNode(TOOLS)
@@ -71,9 +81,10 @@ graph.add_edge("tools", "agent")
 
 kubepilot_agent = graph.compile()
 
+
 # ---------- Run Agent ----------
 def investigate(pod_name: str, namespace: str, alert_name: str) -> dict:
-    print(f"\n🔍 KubePilot AI investigating: {pod_name} | Alert: {alert_name}")
+    logger.info(f"🔍 KubePilot AI investigating: {pod_name} | Alert: {alert_name}")
 
     initial_message = HumanMessage(
         content=f"""Alert received: {alert_name}
@@ -83,15 +94,27 @@ Namespace: {namespace}
 Please investigate this incident step by step using your tools and provide a full RCA."""
     )
 
-    result = kubepilot_agent.invoke({
-        "messages": [SystemMessage(content=SYSTEM_PROMPT), initial_message],
-        "pod_name": pod_name,
-        "namespace": namespace,
-        "alert_name": alert_name,
-        "rca": {}
-    })
-
-    # Extract final response
-    final = result["messages"][-1].content
-    print(f"\n✅ Investigation complete:\n{final}")
-    return {"raw": final, "pod": pod_name, "alert": alert_name}
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            result = kubepilot_agent.invoke({
+                "messages": [SystemMessage(content=SYSTEM_PROMPT), initial_message],
+                "pod_name": pod_name,
+                "namespace": namespace,
+                "alert_name": alert_name,
+                "rca": {},
+            })
+            final = result["messages"][-1].content
+            logger.info(f"✅ Investigation complete:\n{final}")
+            return {"raw": final, "pod": pod_name, "alert": alert_name}
+        except Exception as e:
+            if "rate_limit" in str(e).lower() or "429" in str(e):
+                if attempt < max_retries:
+                    wait = 30 * (attempt + 1)
+                    logger.warning(
+                        f"⏳ Rate limited — retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{max_retries})"
+                    )
+                    time.sleep(wait)
+                    continue
+            raise
