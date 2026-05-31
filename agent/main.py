@@ -66,8 +66,13 @@ class AlertPayload(BaseModel):
 
 
 # ---------- Routes ----------
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 def root():
+    return get_dashboard_html()
+
+
+@app.get("/api/info")
+def api_info():
     model_map = {
         "groq": GROQ_MODEL,
         "openai": OPENAI_MODEL,
