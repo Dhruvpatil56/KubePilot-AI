@@ -126,62 +126,6 @@ kind delete cluster --name kubepilot   # destroy everything
 
 ---
 
-## How secrets work
-
-```
-export GROQ_API_KEY=gsk_...
-        │
-        ▼
-./setup.sh
-        │
-        ▼  kubectl create secret generic kubepilot-secrets
-           --from-literal=GROQ_API_KEY=$GROQ_API_KEY
-        │
-        ▼
-K8s etcd (encrypted at rest)
-        │
-        ▼  secretKeyRef: kubepilot-secrets → GROQ_API_KEY
-        │
-        ▼
-healing-agent pod env var
-```
-
-The deployment YAML references the secret by name — not by value — so it is safe to commit.
-
----
-
-## Optional integrations
-
-**Slack notifications**
-
-```bash
-kubectl set env deployment/healing-agent \
-  SLACK_BOT_TOKEN=xoxb-your-token \
-  SLACK_CHANNEL=C0XXXXXXXXX \
-  -n sre-demo
-```
-
-**GitOps mode** (GitHub PR instead of direct K8s mutation)
-
-```bash
-kubectl set env deployment/healing-agent \
-  GITOPS_MODE=true \
-  GITHUB_TOKEN=ghp_your_token \
-  GITHUB_REPO=your_username/KubePilot-AI \
-  -n sre-demo
-```
-
-**Switch LLM provider**
-
-```bash
-kubectl set env deployment/healing-agent \
-  LLM_PROVIDER=openai \
-  OPENAI_API_KEY=sk-your-key \
-  -n sre-demo
-```
-
----
-
 ## API
 
 | Endpoint              | Description               |
@@ -202,4 +146,5 @@ kubectl set env deployment/healing-agent \
 dhruvpatil56/kubepilot-healing-agent:v4
 dhruvpatil56/kubepilot-broken-app:v3
 ```
+
 
